@@ -1,0 +1,29 @@
+{
+  "name": "nextjs-full-static",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && node critical-css",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "14.2.3",
+    "react": "^18",
+    "react-dom": "^18",
+    "styled-components": "^6.1.10"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "critters": "^0.0.22",
+    "crypto-js": "^4.2.0",
+    "csso": "^5.0.5",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.3",
+    "node-html-parser": "^6.1.13",
+    "typescript": "^5"
+  }
+}
