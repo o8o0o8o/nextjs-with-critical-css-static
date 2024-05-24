@@ -5,106 +5,130 @@ const { parse } = require("node-html-parser");
 const CryptoJS = require("crypto-js");
 const { minify } = require("csso");
 
-function getFiles(dir, files = []) {
+// Recursive function to get files
+function getHTMLFiles(dir, files = []) {
+  // Get an array of all files and directories in the passed directory using fs.readdirSync
   const fileList = fs.readdirSync(dir);
-
+  // Create the full path of the file/directory by concatenating the passed directory and file/directory name
   for (const file of fileList) {
     const name = `${dir}/${file}`;
-
+    // Check if the current file/directory is a directory using fs.statSync
     if (fs.statSync(name).isDirectory()) {
-      getFiles(name, files);
+      // If it is a directory, recursively call the getFiles function with the directory path and the files array
+      getHTMLFiles(name, files);
     } else {
-      files.push(name);
+      // If it is an HTML file, push the full path to the files array
+      if (name.endsWith("html")) {
+        files.push(name);
+      }
     }
   }
 
   return files;
 }
+
 async function criticalCSS() {
   const currentFolder = join(process.cwd(), ".next");
-  const files = getFiles(currentFolder);
+  const files = getHTMLFiles(currentFolder);
 
   const critters = new Critters({
     path: currentFolder,
-    fonts: true,
+    fonts: true, // inline critical font rules (may be better for performance)
   });
 
   for (const file of files) {
-    if (file.endsWith(".html")) {
-      try {
-        const html = fs.readFileSync(file, "utf-8");
-        const DOMBeforeCritters = parse(html);
-        const uniqueImportantStyles = new Set();
+    try {
+      const html = fs.readFileSync(file, "utf-8");
+      const DOMBeforeCritters = parse(html);
+      const uniqueImportantStyles = new Set();
 
-        for (const style of DOMBeforeCritters.querySelectorAll("style")) {
-          uniqueImportantStyles.add(style.innerHTML);
+      // first find all inline styles and add them to Set
+      for (const style of DOMBeforeCritters.querySelectorAll("style")) {
+        uniqueImportantStyles.add(style.innerHTML);
+      }
+
+      const pathPatterns = {
+        real: "/static/css",
+        original: "/_next/static/css",
+      };
+
+      const changedToRealPath = html.replaceAll(
+        pathPatterns.original,
+        pathPatterns.real
+      );
+
+      const inlined = await critters.process(changedToRealPath);
+
+      const restoredNextJSPath = inlined.replaceAll(
+        pathPatterns.real,
+        pathPatterns.original
+      );
+
+      const DOMAfterCritters = parse(restoredNextJSPath);
+      const head = DOMAfterCritters.querySelector("head");
+
+      // remove all <link/> tags left in <header/> if any after critical CSS processing
+      for (const linkInHead of head.querySelectorAll("link")) {
+        if (
+          linkInHead.attributes?.as === "style" ||
+          linkInHead.attributes?.rel === "stylesheet"
+        ) {
+          linkInHead.remove();
         }
+      }
 
-        const pathPatterns = {
-          real: "/static/css",
-          original: "/_next/static/css",
-        };
+      // merge all styles form existing <style/> tags into one string
+      const importantCSS = Array.from(uniqueImportantStyles).join("");
+      const body = DOMAfterCritters.querySelector("body");
 
-        const changedToRealPath = html.replaceAll(
-          pathPatterns.original,
-          pathPatterns.real
-        );
+      if (importantCSS.length > 0) {
+        // using the hash, we will only create a new file if a file with that content does not exist
+        const hash = CryptoJS.MD5(CryptoJS.enc.Latin1.parse(importantCSS));
+        const inlinedStylesPath = `/static/css/styles.${hash}.css`;
+        const attachedStylesheets = [];
+        const stylesheets = [];
 
-        const inlined = await critters.process(changedToRealPath);
-
-        const restoredNextJSPath = inlined.replaceAll(
-          pathPatterns.real,
-          pathPatterns.original
-        );
-
-        const DOMAfterCritters = parse(restoredNextJSPath);
-        const head = DOMAfterCritters.querySelector("head");
-
-        for (const linkInHead of head.querySelectorAll("link")) {
+        // find all <link/> tags with styles, get href from them and remove them from HTML
+        for (const linkInHead of DOMAfterCritters.querySelectorAll("link")) {
           if (
             linkInHead.attributes?.as === "style" ||
             linkInHead.attributes?.rel === "stylesheet"
           ) {
+            attachedStylesheets.push(linkInHead.getAttribute("href"));
+
             linkInHead.remove();
           }
         }
 
-        const importantCSS = Array.from(uniqueImportantStyles).join("");
-        const body = DOMAfterCritters.querySelector("body");
-
-        if (importantCSS.length > 0) {
-          const hash = CryptoJS.MD5(CryptoJS.enc.Latin1.parse(importantCSS));
-          const inlinedStylesPath = `/static/css/styles.${hash}.css`;
-          const attachedStylesheets = [];
-          const stylesheets = [];
-
-          for (const stylesheet of attachedStylesheets) {
-            const stylesheetStyles = fs.readFileSync(
-              join(currentFolder, stylesheet)
-            );
-
-            stylesheets.push(stylesheetStyles);
-          }
-          // Merge all stylesheets in one, add importantCSS in the end to persist specificity
-          const allInOne = stylesheets.join("") + importantCSS;
-
-          fs.writeFileSync(
-            join(currentFolder, inlinedStylesPath),
-            minify(allInOne).css
+        // go through found stylesheets: read file with CSS and push CSS string to stylesheets array
+        for (const stylesheet of attachedStylesheets) {
+          const stylesheetStyles = fs.readFileSync(
+            join(currentFolder, stylesheet)
           );
 
-          if (body) {
-            body.insertAdjacentHTML(
-              "beforeend",
-              `<link rel="stylesheet" href="/_next${inlinedStylesPath}" />`
-            );
-          }
+          stylesheets.push(stylesheetStyles);
         }
 
-        fs.writeFileSync(file, DOMAfterCritters.toString());
-      } catch (error) {
-        console.log(error);
+        // Merge all stylesheets in one, add importantCSS in the end to persist specificity
+        const allInOne = stylesheets.join("") + importantCSS;
+
+        fs.writeFileSync(
+          join(currentFolder, inlinedStylesPath),
+          // minification is optional here, it doesn't affect performance -- it is a lazy loaded CSS stylesheet, it only affects payload
+          minify(allInOne).css
+        );
+
+        if (body) {
+          body.insertAdjacentHTML(
+            "beforeend",
+            `<link rel="stylesheet" href="/_next${inlinedStylesPath}" />`
+          );
+        }
       }
+
+      fs.writeFileSync(file, DOMAfterCritters.toString());
+    } catch (error) {
+      console.log(error);
     }
   }
 }
