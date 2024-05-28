@@ -58,50 +58,30 @@ async function criticalCSS() {
       );
 
       const inlined = await critters.process(changedToRealPath);
-
-      const restoredNextJSPath = inlined.replaceAll(
-        pathPatterns.real,
-        pathPatterns.original
-      );
-
-      const DOMAfterCritters = parse(restoredNextJSPath);
-      const head = DOMAfterCritters.querySelector("head");
-
-      // remove all <link/> tags left in <header/> if any after critical CSS processing
-      for (const linkInHead of head.querySelectorAll("link")) {
-        if (
-          linkInHead.attributes?.as === "style" ||
-          linkInHead.attributes?.rel === "stylesheet"
-        ) {
-          linkInHead.remove();
-        }
-      }
+      const DOMAfterCritters = parse(inlined);
 
       // merge all styles form existing <style/> tags into one string
       const importantCSS = Array.from(uniqueImportantStyles).join("");
       const body = DOMAfterCritters.querySelector("body");
 
       if (importantCSS.length > 0) {
-        // using the hash, we will only create a new file if a file with that content does not exist
-        const hash = CryptoJS.MD5(CryptoJS.enc.Latin1.parse(importantCSS));
-        const inlinedStylesPath = `/static/css/styles.${hash}.css`;
-        const attachedStylesheets = [];
+        const attachedStylesheets = new Set();
         const stylesheets = [];
 
         // find all <link/> tags with styles, get href from them and remove them from HTML
-        for (const linkInHead of DOMAfterCritters.querySelectorAll("link")) {
+        for (const link of DOMAfterCritters.querySelectorAll("link")) {
           if (
-            linkInHead.attributes?.as === "style" ||
-            linkInHead.attributes?.rel === "stylesheet"
+            link.attributes?.as === "style" ||
+            link.attributes?.rel === "stylesheet"
           ) {
-            attachedStylesheets.push(linkInHead.getAttribute("href"));
+            attachedStylesheets.add(link.getAttribute("href"));
 
-            linkInHead.remove();
+            link.remove();
           }
         }
 
         // go through found stylesheets: read file with CSS and push CSS string to stylesheets array
-        for (const stylesheet of attachedStylesheets) {
+        for (const stylesheet of Array.from(attachedStylesheets)) {
           const stylesheetStyles = fs.readFileSync(
             join(currentFolder, stylesheet)
           );
@@ -111,6 +91,9 @@ async function criticalCSS() {
 
         // Merge all stylesheets in one, add importantCSS in the end to persist specificity
         const allInOne = stylesheets.join("") + importantCSS;
+        // using the hash, we will only create a new file if a file with that content does not exist
+        const hash = CryptoJS.MD5(CryptoJS.enc.Latin1.parse(allInOne));
+        const inlinedStylesPath = `/static/css/styles.${hash}.css`;
 
         fs.writeFileSync(
           join(currentFolder, inlinedStylesPath),
