@@ -1,4 +1,4 @@
-const Critters = require("critters");
+const Beasties = require("beasties");
 const { join } = require("path");
 const fs = require("fs");
 const { parse } = require("node-html-parser");
@@ -31,7 +31,7 @@ async function criticalCSS() {
   const currentFolder = join(process.cwd(), ".next");
   const files = getHTMLFiles(currentFolder);
 
-  const critters = new Critters({
+  const beasties = new Beasties({
     path: currentFolder,
     fonts: true, // inline critical font rules (may be better for performance)
   });
@@ -39,11 +39,11 @@ async function criticalCSS() {
   for (const file of files) {
     try {
       const html = fs.readFileSync(file, "utf-8");
-      const DOMBeforeCritters = parse(html);
+      const DOMBeforeBeasties = parse(html);
       const uniqueImportantStyles = new Set();
 
       // first find all inline styles and add them to Set
-      for (const style of DOMBeforeCritters.querySelectorAll("style")) {
+      for (const style of DOMBeforeBeasties.querySelectorAll("style")) {
         uniqueImportantStyles.add(style.innerHTML);
       }
 
@@ -57,19 +57,19 @@ async function criticalCSS() {
         pathPatterns.real
       );
 
-      const inlined = await critters.process(changedToRealPath);
-      const DOMAfterCritters = parse(inlined);
+      const inlined = await beasties.process(changedToRealPath);
+      const DOMAfterBeasties = parse(inlined);
 
       // merge all styles form existing <style/> tags into one string
       const importantCSS = Array.from(uniqueImportantStyles).join("");
-      const body = DOMAfterCritters.querySelector("body");
+      const body = DOMAfterBeasties.querySelector("body");
 
       if (importantCSS.length > 0) {
         const attachedStylesheets = new Set();
         const stylesheets = [];
 
         // find all <link/> tags with styles, get href from them and remove them from HTML
-        for (const link of DOMAfterCritters.querySelectorAll("link")) {
+        for (const link of DOMAfterBeasties.querySelectorAll("link")) {
           if (
             link.attributes?.as === "style" ||
             link.attributes?.rel === "stylesheet"
@@ -109,7 +109,7 @@ async function criticalCSS() {
         }
       }
 
-      fs.writeFileSync(file, DOMAfterCritters.toString());
+      fs.writeFileSync(file, DOMAfterBeasties.toString());
     } catch (error) {
       console.log(error);
     }
